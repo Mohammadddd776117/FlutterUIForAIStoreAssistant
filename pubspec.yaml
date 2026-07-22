@@ -32,10 +32,16 @@ dependencies:
   # Icons
   cupertino_icons: ^1.0.6
 
+  # Local Database — Drift (SQLite offline-first)
+  drift: ^2.18.0
+  drift_flutter: ^0.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  drift_dev: ^2.18.0
+  build_runner: ^2.4.12
 
 flutter:
   uses-material-design: true
