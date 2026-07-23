@@ -19,20 +19,24 @@ class InventoryScreen extends StatefulWidget {
   State<InventoryScreen> createState() => _InventoryScreenState();
 }
 
-class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProviderStateMixin {
+class _InventoryScreenState extends State<InventoryScreen>
+    with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   final _searchCtrl = TextEditingController();
-  final ProductRepository _repository = ProductRepository();
+
+  /// Repository used for all CRUD operations.
+  final _repository = ProductRepository();
+
+  /// Reactive stream — emits a fresh list whenever the database changes.
+  late final Stream<List<ProductModel>> _productsStream;
+
   String _query = '';
-  List<ProductModel> _products = [];
-  bool _isLoading = false;
-  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _loadProducts();
+    _productsStream = _repository.watchAllProducts();
   }
 
   @override
@@ -40,29 +44,6 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
     _tabController.dispose();
     _searchCtrl.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadProducts() async {
-    if (!mounted) return;
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final products = await _repository.getAllProducts(query: _query);
-      if (!mounted) return;
-      setState(() => _products = products);
-    } on RepositoryException catch (e) {
-      if (!mounted) return;
-      setState(() => _errorMessage = e.message);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _refreshProducts() async {
-    await _loadProducts();
   }
 
   void _showMessage(String message, {bool isError = false}) {
@@ -80,8 +61,12 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
         title: const Text('Delete Product'),
         content: Text('Delete ${product.name}?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
         ],
       ),
     );
@@ -89,8 +74,8 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
 
     try {
       await _repository.deleteProduct(product.id);
+      // Stream auto-refreshes — just show confirmation.
       _showMessage('Product removed.');
-      await _loadProducts();
     } on RepositoryException catch (e) {
       _showMessage(e.message, isError: true);
     }
@@ -99,19 +84,25 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   void _showEditProduct(ProductModel product) {
     final nameCtrl = TextEditingController(text: product.name);
     final categoryCtrl = TextEditingController(text: product.category);
-    final purchasePriceCtrl = TextEditingController(text: product.purchasePrice.toString());
-    final sellingPriceCtrl = TextEditingController(text: product.sellingPrice.toString());
-    final quantityCtrl = TextEditingController(text: product.quantity.toString());
+    final purchasePriceCtrl =
+        TextEditingController(text: product.purchasePrice.toString());
+    final sellingPriceCtrl =
+        TextEditingController(text: product.sellingPrice.toString());
+    final quantityCtrl =
+        TextEditingController(text: product.quantity.toString());
     final barcodeCtrl = TextEditingController(text: product.barcode ?? '');
-    final descriptionCtrl = TextEditingController(text: product.description ?? '');
+    final descriptionCtrl =
+        TextEditingController(text: product.description ?? '');
     final formKey = GlobalKey<FormState>();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.viewInsetsOf(ctx).bottom + 20),
+        padding: EdgeInsets.fromLTRB(
+            20, 20, 20, MediaQuery.viewInsetsOf(ctx).bottom + 20),
         child: Form(
           key: formKey,
           child: SingleChildScrollView(
@@ -119,48 +110,93 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Edit Product', style: Theme.of(context).textTheme.titleLarge),
+                Text('Edit Product',
+                    style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 16),
-                CustomTextField(label: 'Product Name', controller: nameCtrl, validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null),
+                CustomTextField(
+                    label: 'Product Name',
+                    controller: nameCtrl,
+                    validator: (v) =>
+                        (v?.trim().isEmpty ?? true) ? 'Required' : null),
                 const SizedBox(height: 12),
-                CustomTextField(label: 'Category', controller: categoryCtrl, validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null),
+                CustomTextField(
+                    label: 'Category',
+                    controller: categoryCtrl,
+                    validator: (v) =>
+                        (v?.trim().isEmpty ?? true) ? 'Required' : null),
                 const SizedBox(height: 12),
                 Row(children: [
-                  Expanded(child: CustomTextField(label: 'Purchase Price (YER)', controller: purchasePriceCtrl, keyboardType: TextInputType.number, validator: (v) => (double.tryParse(v ?? '') ?? -1) < 0 ? 'Must be a number' : null)),
+                  Expanded(
+                      child: CustomTextField(
+                          label: 'Purchase Price (YER)',
+                          controller: purchasePriceCtrl,
+                          keyboardType: TextInputType.number,
+                          validator: (v) =>
+                              (double.tryParse(v ?? '') ?? -1) < 0
+                                  ? 'Must be a number'
+                                  : null)),
                   const SizedBox(width: 12),
-                  Expanded(child: CustomTextField(label: 'Selling Price (YER)', controller: sellingPriceCtrl, keyboardType: TextInputType.number, validator: (v) => (double.tryParse(v ?? '') ?? -1) < 0 ? 'Must be a number' : null)),
+                  Expanded(
+                      child: CustomTextField(
+                          label: 'Selling Price (YER)',
+                          controller: sellingPriceCtrl,
+                          keyboardType: TextInputType.number,
+                          validator: (v) =>
+                              (double.tryParse(v ?? '') ?? -1) < 0
+                                  ? 'Must be a number'
+                                  : null)),
                 ]),
                 const SizedBox(height: 12),
                 Row(children: [
-                  Expanded(child: CustomTextField(label: 'Quantity', controller: quantityCtrl, keyboardType: TextInputType.number, validator: (v) => (int.tryParse(v ?? '') ?? -1) < 0 ? 'Must be a number' : null)),
+                  Expanded(
+                      child: CustomTextField(
+                          label: 'Quantity',
+                          controller: quantityCtrl,
+                          keyboardType: TextInputType.number,
+                          validator: (v) =>
+                              (int.tryParse(v ?? '') ?? -1) < 0
+                                  ? 'Must be a number'
+                                  : null)),
                   const SizedBox(width: 12),
-                  Expanded(child: CustomTextField(label: 'Barcode (optional)', controller: barcodeCtrl)),
+                  Expanded(
+                      child: CustomTextField(
+                          label: 'Barcode (optional)',
+                          controller: barcodeCtrl)),
                 ]),
                 const SizedBox(height: 12),
-                CustomTextField(label: 'Description (optional)', controller: descriptionCtrl, maxLines: 3),
+                CustomTextField(
+                    label: 'Description (optional)',
+                    controller: descriptionCtrl,
+                    maxLines: 3),
                 const SizedBox(height: 20),
-                CustomButton(label: 'Save Changes', onPressed: () async {
-                  if (!(formKey.currentState?.validate() ?? false)) return;
-                  try {
-                    await _repository.updateProduct(
-                      id: product.id,
-                      name: nameCtrl.text,
-                      category: categoryCtrl.text,
-                      purchasePrice: double.parse(purchasePriceCtrl.text),
-                      sellingPrice: double.parse(sellingPriceCtrl.text),
-                      quantity: int.parse(quantityCtrl.text),
-                      barcode: barcodeCtrl.text.trim().isEmpty ? null : barcodeCtrl.text.trim(),
-                      description: descriptionCtrl.text.trim().isEmpty ? null : descriptionCtrl.text.trim(),
-                    );
-                    if (!mounted) return;
-                    Navigator.pop(ctx);
-                    _showMessage('Product updated.');
-                    await _loadProducts();
-                  } on RepositoryException catch (e) {
-                    if (!mounted) return;
-                    _showMessage(e.message, isError: true);
-                  }
-                }),
+                CustomButton(
+                    label: 'Save Changes',
+                    onPressed: () async {
+                      if (!(formKey.currentState?.validate() ?? false)) return;
+                      try {
+                        await _repository.updateProduct(
+                          id: product.id,
+                          name: nameCtrl.text,
+                          category: categoryCtrl.text,
+                          purchasePrice: double.parse(purchasePriceCtrl.text),
+                          sellingPrice: double.parse(sellingPriceCtrl.text),
+                          quantity: int.parse(quantityCtrl.text),
+                          barcode: barcodeCtrl.text.trim().isEmpty
+                              ? null
+                              : barcodeCtrl.text.trim(),
+                          description: descriptionCtrl.text.trim().isEmpty
+                              ? null
+                              : descriptionCtrl.text.trim(),
+                        );
+                        if (!mounted) return;
+                        Navigator.pop(ctx);
+                        // Stream auto-refreshes — just show confirmation.
+                        _showMessage('Product updated.');
+                      } on RepositoryException catch (e) {
+                        if (!mounted) return;
+                        _showMessage(e.message, isError: true);
+                      }
+                    }),
               ],
             ),
           ),
@@ -183,57 +219,81 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
           ],
         ),
       ),
-      body: LoadingOverlay(
-        isLoading: _isLoading,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(AppConstants.paddingMD),
-              child: TextField(
-                controller: _searchCtrl,
-                decoration: InputDecoration(
-                  hintText: 'Search products...',
-                  prefixIcon: const Icon(Icons.search_rounded),
-                  suffixIcon: _query.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear_rounded),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() => _query = '');
-                            _loadProducts();
-                          },
-                        )
-                      : null,
-                ),
-                onChanged: (v) {
-                  setState(() => _query = v);
-                  _loadProducts();
-                },
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(AppConstants.paddingMD),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Search products...',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _query.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _query = '');
+                        },
+                      )
+                    : null,
               ),
+              onChanged: (v) => setState(() => _query = v),
             ),
-            if (_errorMessage != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(_errorMessage!, style: const TextStyle(color: AppColors.error)),
-              ),
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _InventoryList(filter: 'all', query: _query, products: _products, onEdit: _showEditProduct, onDelete: _deleteProduct),
-                  _InventoryList(filter: 'low', query: _query, products: _products, onEdit: _showEditProduct, onDelete: _deleteProduct),
-                  _InventoryList(filter: 'out', query: _query, products: _products, onEdit: _showEditProduct, onDelete: _deleteProduct),
-                ],
-              ),
+          ),
+          Expanded(
+            child: StreamBuilder<List<ProductModel>>(
+              stream: _productsStream,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'Error loading products: ${snapshot.error}',
+                        style: const TextStyle(color: AppColors.error),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  );
+                }
+
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final products = snapshot.data!;
+
+                return TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _InventoryList(
+                        filter: 'all',
+                        query: _query,
+                        products: products,
+                        onEdit: _showEditProduct,
+                        onDelete: _deleteProduct),
+                    _InventoryList(
+                        filter: 'low',
+                        query: _query,
+                        products: products,
+                        onEdit: _showEditProduct,
+                        onDelete: _deleteProduct),
+                    _InventoryList(
+                        filter: 'out',
+                        query: _query,
+                        products: products,
+                        onEdit: _showEditProduct,
+                        onDelete: _deleteProduct),
+                  ],
+                );
+              },
             ),
-          ],
-        ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await context.push('/scanner');
-          await _loadProducts();
-        },
+        onPressed: () => context.push('/scanner'),
         backgroundColor: AppColors.primary,
         icon: const Icon(Icons.add_rounded, color: Colors.white),
         label: const Text('Add Product', style: TextStyle(color: Colors.white)),
@@ -243,7 +303,12 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
 }
 
 class _InventoryList extends StatelessWidget {
-  const _InventoryList({required this.filter, required this.query, required this.products, required this.onEdit, required this.onDelete});
+  const _InventoryList(
+      {required this.filter,
+      required this.query,
+      required this.products,
+      required this.onEdit,
+      required this.onDelete});
   final String filter;
   final String query;
   final List<ProductModel> products;
@@ -279,13 +344,15 @@ class _InventoryList extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
       itemCount: filtered.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (ctx, i) => _ProductRow(product: filtered[i], onEdit: onEdit, onDelete: onDelete),
+      itemBuilder: (ctx, i) =>
+          _ProductRow(product: filtered[i], onEdit: onEdit, onDelete: onDelete),
     );
   }
 }
 
 class _ProductRow extends StatelessWidget {
-  const _ProductRow({required this.product, required this.onEdit, required this.onDelete});
+  const _ProductRow(
+      {required this.product, required this.onEdit, required this.onDelete});
   final ProductModel product;
   final ValueChanged<ProductModel> onEdit;
   final ValueChanged<ProductModel> onDelete;
@@ -310,7 +377,8 @@ class _ProductRow extends StatelessWidget {
               color: AppColors.primary.withOpacity(0.08),
               borderRadius: BorderRadius.circular(AppConstants.radiusSmall),
             ),
-            child: const Icon(Icons.inventory_2_outlined, color: AppColors.primary),
+            child: const Icon(Icons.inventory_2_outlined,
+                color: AppColors.primary),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -323,7 +391,9 @@ class _ProductRow extends StatelessWidget {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    _InfoBadge(label: 'Qty: ${product.quantity}', color: _statusColor),
+                    _InfoBadge(
+                        label: 'Qty: ${product.quantity}',
+                        color: _statusColor),
                     const SizedBox(width: 6),
                     _InfoBadge(label: product.stockStatus, color: _statusColor),
                   ],
@@ -335,16 +405,24 @@ class _ProductRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                NumberFormat.currency(locale: 'en_US', symbol: 'YER ', decimalDigits: 0).format(product.sellingPrice),
-                style: textTheme.titleSmall?.copyWith(color: AppColors.primary, fontWeight: FontWeight.w700),
+                NumberFormat.currency(
+                        locale: 'en_US', symbol: 'YER ', decimalDigits: 0)
+                    .format(product.sellingPrice),
+                style: textTheme.titleSmall?.copyWith(
+                    color: AppColors.primary, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _IconBtn(icon: Icons.edit_outlined, onTap: () => onEdit(product)),
+                  _IconBtn(
+                      icon: Icons.edit_outlined,
+                      onTap: () => onEdit(product)),
                   const SizedBox(width: 4),
-                  _IconBtn(icon: Icons.delete_outline_rounded, onTap: () => onDelete(product), color: AppColors.error),
+                  _IconBtn(
+                      icon: Icons.delete_outline_rounded,
+                      onTap: () => onDelete(product),
+                      color: AppColors.error),
                 ],
               ),
             ],
@@ -370,7 +448,10 @@ class _InfoBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+        style: Theme.of(context)
+            .textTheme
+            .labelSmall
+            ?.copyWith(color: color),
       ),
     );
   }
@@ -397,4 +478,3 @@ class _IconBtn extends StatelessWidget {
     );
   }
 }
-

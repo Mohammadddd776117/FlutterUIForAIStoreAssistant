@@ -29,7 +29,7 @@ class SaleRepository {
 
     try {
       final subtotal = items.fold<double>(0, (sum, item) => sum + (item.sellingPrice * item.quantity));
-      final total = (subtotal - discount).clamp(0, double.infinity);
+      final total = (subtotal - discount).clamp(0, double.infinity).toDouble();
 
       final saleId = Uuid().v4();
       final now = DateTime.now();
@@ -111,7 +111,7 @@ class SaleRepository {
   Future<List<SaleModel>> getRecentSales() async {
     try {
       final rows = await (_db.select(_db.sales)
-            ..orderBy([(t) => OrderingTerm.desc(t.createdAt))]
+            ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
             ..limit(10))
           .get();
       final items = <SaleModel>[];

@@ -8,6 +8,16 @@ import 'repository_exceptions.dart';
 class ProductRepository {
   final AppDatabase _db = AppDatabase.instance;
 
+  /// Returns a reactive stream of all products, ordered by creation date
+  /// (newest first). The stream emits a new list whenever the database changes,
+  /// enabling the UI to refresh automatically without manual reloads.
+  Stream<List<ProductModel>> watchAllProducts() {
+    return (_db.select(_db.products)
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
+        .watch()
+        .map((rows) => rows.map(_mapRow).toList());
+  }
+
   Future<List<ProductModel>> getAllProducts({String? query}) async {
     try {
       final rows = await (_db.select(_db.products)

@@ -72,7 +72,7 @@ class DebtRepository {
       if (existing == null) {
         throw ValidationException('Debt not found.');
       }
-      final updatedPaid = (existing.paidAmount + amount).clamp(0, existing.originalAmount.toDouble());
+      final updatedPaid = (existing.paidAmount + amount).clamp(0, existing.originalAmount.toDouble()).toDouble();
       await (_db.update(_db.debts)
             ..where((tbl) => tbl.id.equals(id)))
           .write(DebtsCompanion(paidAmount: Value(updatedPaid)));
