@@ -108,6 +108,47 @@ class SaleRepository {
     }
   }
 
+  /// Watches the most recent [limit] sales as a reactive stream.
+  ///
+  /// Emits a new list automatically whenever the sales table changes,
+  /// so the UI refreshes without manual reloads.
+  Stream<List<SaleModel>> watchRecentSales({int limit = 50}) {
+    return (_db.select(_db.sales)
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+          ..limit(limit))
+        .watch()
+        .asyncMap((rows) async {
+      final result = <SaleModel>[];
+      for (final row in rows) {
+        final saleItems = await (_db.select(_db.saleItems)
+              ..where((tbl) => tbl.saleId.equals(row.id)))
+            .get();
+        result.add(SaleModel(
+          id: row.id,
+          items: saleItems
+              .map((item) => SaleItemModel(
+                    productId: item.productId,
+                    productName: item.productName,
+                    quantity: item.quantity,
+                    unitPrice: item.unitPrice,
+                    totalPrice: item.totalPrice,
+                  ))
+              .toList(),
+          subtotal: row.subtotal,
+          discount: row.discount,
+          total: row.total,
+          customerId: row.customerId,
+          customerName: row.customerName,
+          workerId: row.workerId,
+          branchId: row.branchId,
+          createdAt: row.createdAt,
+          paymentMethod: row.paymentMethod,
+        ));
+      }
+      return result;
+    });
+  }
+
   Future<List<SaleModel>> getRecentSales() async {
     try {
       final rows = await (_db.select(_db.sales)
