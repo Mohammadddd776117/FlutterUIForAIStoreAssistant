@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/models/debt_model.dart';
 import '../../../shared/repositories/debt_repository.dart';
 import '../../../shared/repositories/repository_exceptions.dart';
 import '../../../shared/widgets/app_card.dart';
@@ -17,42 +19,121 @@ class DebtsScreen extends StatefulWidget {
 
 class _DebtsScreenState extends State<DebtsScreen> {
   final DebtRepository _repository = DebtRepository();
-  final List<_DebtEntry> _debts = [];
-  bool _isLoading = false;
-  String? _errorMessage;
+
+  late final Stream<List<DebtModel>> _debtsStream;
 
   @override
   void initState() {
     super.initState();
-    _loadDebts();
+    _debtsStream = _repository.watchDebts();
   }
 
-  Future<void> _loadDebts() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  void _showMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: isError ? AppColors.error : AppColors.success,
+    ));
+  }
+
+  Future<void> _deleteDebt(DebtModel debt) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Debt'),
+        content: Text('Delete debt for ${debt.customerName}?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
     try {
-      final debts = await _repository.getDebts();
-      setState(() {
-        _debts.clear();
-        _debts.addAll(debts.map((debt) => _DebtEntry(
-              id: debt.id,
-              customerName: debt.customerName,
-              originalAmount: debt.originalAmount,
-              paidAmount: debt.totalPaid,
-              date: debt.createdAt,
-              note: debt.note,
-            )));
-      });
+      await _repository.deleteDebt(debt.id);
+      _showMessage('Debt removed.');
     } on RepositoryException catch (e) {
-      setState(() => _errorMessage = e.message);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      _showMessage(e.message, isError: true);
     }
   }
 
-  double get _totalDebt => _debts.fold(0, (s, d) => s + d.remaining);
+  void _showEditDebt(DebtModel debt) {
+    final nameCtrl = TextEditingController(text: debt.customerName);
+    final amountCtrl =
+        TextEditingController(text: debt.originalAmount.toString());
+    final noteCtrl = TextEditingController(text: debt.note ?? '');
+    final formKey = GlobalKey<FormState>();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            20, 20, 20, MediaQuery.viewInsetsOf(ctx).bottom + 20),
+        child: Form(
+          key: formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Edit Debt',
+                    style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 16),
+                CustomTextField(
+                    label: 'Customer Name',
+                    controller: nameCtrl,
+                    validator: (v) =>
+                        (v?.trim().isEmpty ?? true) ? 'Required' : null),
+                const SizedBox(height: 12),
+                CustomTextField(
+                    label: 'Amount (YER)',
+                    controller: amountCtrl,
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      if (v?.trim().isEmpty ?? true) return 'Required';
+                      if (double.tryParse(v!) == null) return 'Must be a number';
+                      return null;
+                    }),
+                const SizedBox(height: 12),
+                CustomTextField(
+                    label: 'Note (optional)', controller: noteCtrl),
+                const SizedBox(height: 20),
+                CustomButton(
+                    label: 'Save Changes',
+                    onPressed: () async {
+                      if (!(formKey.currentState?.validate() ?? false)) return;
+                      try {
+                        await _repository.updateDebt(
+                          id: debt.id,
+                          customerName: nameCtrl.text,
+                          amount: double.parse(amountCtrl.text),
+                          note: noteCtrl.text.trim().isEmpty
+                              ? null
+                              : noteCtrl.text.trim(),
+                        );
+                        if (!mounted) return;
+                        Navigator.pop(ctx);
+                        _showMessage('Debt updated.');
+                      } on RepositoryException catch (e) {
+                        if (!mounted) return;
+                        _showMessage(e.message, isError: true);
+                      }
+                    }),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   void _showAddDebtDialog() {
     final nameCtrl = TextEditingController();
@@ -64,71 +145,71 @@ class _DebtsScreenState extends State<DebtsScreen> {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.viewInsetsOf(ctx).bottom + 20),
+        padding: EdgeInsets.fromLTRB(
+            20, 20, 20, MediaQuery.viewInsetsOf(ctx).bottom + 20),
         child: Form(
           key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Add Debt', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 16),
-              CustomTextField(
-                label: 'Customer Name',
-                hint: 'Full name',
-                controller: nameCtrl,
-                validator: (v) => (v?.isEmpty ?? true) ? 'Required' : null,
-              ),
-              const SizedBox(height: 12),
-              CustomTextField(
-                label: 'Amount (YER)',
-                hint: '0',
-                controller: amountCtrl,
-                keyboardType: TextInputType.number,
-                validator: (v) {
-                  if (v?.isEmpty ?? true) return 'Required';
-                  if (double.tryParse(v!) == null) return 'Must be a number';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              CustomTextField(
-                label: 'Note (optional)',
-                hint: 'e.g. Grocery purchase',
-                controller: noteCtrl,
-              ),
-              const SizedBox(height: 20),
-              CustomButton(
-                label: 'Add Debt',
-                onPressed: () async {
-                  if (formKey.currentState?.validate() ?? false) {
-                    try {
-                      await _repository.createDebt(
-                        customerName: nameCtrl.text.trim(),
-                        amount: double.parse(amountCtrl.text),
-                        note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
-                      );
-                      if (!mounted) return;
-                      Navigator.pop(ctx);
-                      await _loadDebts();
-                    } on RepositoryException catch (e) {
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
-                    }
-                  }
-                },
-              ),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Add Debt', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 16),
+                CustomTextField(
+                    label: 'Customer Name',
+                    hint: 'Full name',
+                    controller: nameCtrl,
+                    validator: (v) =>
+                        (v?.trim().isEmpty ?? true) ? 'Required' : null),
+                const SizedBox(height: 12),
+                CustomTextField(
+                    label: 'Amount (YER)',
+                    hint: '0',
+                    controller: amountCtrl,
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      if (v?.trim().isEmpty ?? true) return 'Required';
+                      if (double.tryParse(v!) == null) return 'Must be a number';
+                      return null;
+                    }),
+                const SizedBox(height: 12),
+                CustomTextField(
+                    label: 'Note (optional)',
+                    hint: 'e.g. Grocery purchase',
+                    controller: noteCtrl),
+                const SizedBox(height: 20),
+                CustomButton(
+                    label: 'Add Debt',
+                    onPressed: () async {
+                      if (!(formKey.currentState?.validate() ?? false)) return;
+                      try {
+                        await _repository.createDebt(
+                          customerName: nameCtrl.text.trim(),
+                          amount: double.parse(amountCtrl.text),
+                          note: noteCtrl.text.trim().isEmpty
+                              ? null
+                              : noteCtrl.text.trim(),
+                        );
+                        if (!mounted) return;
+                        Navigator.pop(ctx);
+                        _showMessage('Debt added.');
+                      } on RepositoryException catch (e) {
+                        if (!mounted) return;
+                        _showMessage(e.message, isError: true);
+                      }
+                    }),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  void _recordPayment(_DebtEntry debt) {
+  void _recordPayment(DebtModel debt) {
     final amountCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -142,12 +223,15 @@ class _DebtsScreenState extends State<DebtsScreen> {
             TextField(
               controller: amountCtrl,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Payment amount (YER)'),
+              decoration:
+                  const InputDecoration(labelText: 'Payment amount (YER)'),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
               final amount = double.tryParse(amountCtrl.text);
@@ -156,10 +240,10 @@ class _DebtsScreenState extends State<DebtsScreen> {
                   await _repository.recordPayment(debt.id, amount);
                   if (!mounted) return;
                   Navigator.pop(ctx);
-                  await _loadDebts();
+                  _showMessage('Payment recorded.');
                 } on RepositoryException catch (e) {
                   if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
+                  _showMessage(e.message, isError: true);
                 }
               }
             },
@@ -175,56 +259,91 @@ class _DebtsScreenState extends State<DebtsScreen> {
     final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Debt Management')),
-      body: Column(
-        children: [
-          // Summary banner
-          Container(
-            margin: const EdgeInsets.all(AppConstants.paddingMD),
-            padding: const EdgeInsets.all(AppConstants.paddingMD),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [AppColors.error, Color(0xFFDC2626)],
+      body: StreamBuilder<List<DebtModel>>(
+        stream: _debtsStream,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  'Error loading debts: ${snapshot.error}',
+                  style: const TextStyle(color: AppColors.error),
+                  textAlign: TextAlign.center,
+                ),
               ),
-              borderRadius: BorderRadius.circular(AppConstants.radiusLarge),
-            ),
-            child: Row(
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            );
+          }
+
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final debts = snapshot.data!;
+          final totalDebt =
+              debts.fold(0.0, (s, d) => s + d.remaining);
+
+          return Column(
+            children: [
+              // Summary banner
+              Container(
+                margin: const EdgeInsets.all(AppConstants.paddingMD),
+                padding: const EdgeInsets.all(AppConstants.paddingMD),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AppColors.error, Color(0xFFDC2626)],
+                  ),
+                  borderRadius:
+                      BorderRadius.circular(AppConstants.radiusLarge),
+                ),
+                child: Row(
                   children: [
-                    Text('Total Outstanding Debt', style: textTheme.bodySmall?.copyWith(color: Colors.white70)),
-                    Text(
-                      'YER ${_totalDebt.toStringAsFixed(0).replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',')}',
-                      style: textTheme.headlineMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w700),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Total Outstanding Debt',
+                            style: textTheme.bodySmall
+                                ?.copyWith(color: Colors.white70)),
+                        Text(
+                          'YER ${totalDebt.toStringAsFixed(0).replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',')}',
+                          style: textTheme.headlineMedium?.copyWith(
+                              color: Colors.white, fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                            '${debts.where((d) => d.remaining > 0).length} customers with debt',
+                            style: textTheme.bodySmall
+                                ?.copyWith(color: Colors.white70)),
+                      ],
                     ),
-                    Text('${_debts.where((d) => d.remaining > 0).length} customers with debt', style: textTheme.bodySmall?.copyWith(color: Colors.white70)),
+                    const Spacer(),
+                    const Icon(Icons.account_balance_wallet_rounded,
+                        color: Colors.white54, size: 48),
                   ],
                 ),
-                const Spacer(),
-                const Icon(Icons.account_balance_wallet_rounded, color: Colors.white54, size: 48),
-              ],
-            ),
-          ),
-
-          if (_errorMessage != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppConstants.paddingMD),
-              child: Text(_errorMessage!, style: const TextStyle(color: AppColors.error)),
-            ),
-          // Debt list
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _debts.isEmpty
-                    ? EmptyState(icon: Icons.people_outline_rounded, title: 'No debts recorded', subtitle: 'All customers are paid up.')
+              ),
+              // Debt list
+              Expanded(
+                child: debts.isEmpty
+                    ? EmptyState(
+                        icon: Icons.people_outline_rounded,
+                        title: 'No debts recorded',
+                        subtitle: 'All customers are paid up.')
                     : ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: AppConstants.paddingMD),
-                        itemCount: _debts.length,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppConstants.paddingMD),
+                        itemCount: debts.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (ctx, i) => _DebtTile(debt: _debts[i], onPay: () => _recordPayment(_debts[i])),
+                        itemBuilder: (ctx, i) => _DebtTile(
+                          debt: debts[i],
+                          onPay: () => _recordPayment(debts[i]),
+                          onEdit: () => _showEditDebt(debts[i]),
+                          onDelete: () => _deleteDebt(debts[i]),
+                        ),
                       ),
-          ),
-        ],
+              ),
+            ],
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddDebtDialog,
@@ -237,9 +356,12 @@ class _DebtsScreenState extends State<DebtsScreen> {
 }
 
 class _DebtTile extends StatelessWidget {
-  const _DebtTile({required this.debt, required this.onPay});
-  final _DebtEntry debt;
+  const _DebtTile(
+      {required this.debt, required this.onPay, this.onEdit, this.onDelete});
+  final DebtModel debt;
   final VoidCallback onPay;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -255,10 +377,15 @@ class _DebtTile extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 20,
-                backgroundColor: (isPaid ? AppColors.success : AppColors.error).withOpacity(0.12),
+                backgroundColor:
+                    (isPaid ? AppColors.success : AppColors.error)
+                        .withOpacity(0.12),
                 child: Text(
-                  debt.customerName.substring(0, 1).toUpperCase(),
-                  style: textTheme.titleSmall?.copyWith(color: isPaid ? AppColors.success : AppColors.error),
+                  debt.customerName.isNotEmpty
+                      ? debt.customerName.substring(0, 1).toUpperCase()
+                      : '?',
+                  style: textTheme.titleSmall?.copyWith(
+                      color: isPaid ? AppColors.success : AppColors.error),
                 ),
               ),
               const SizedBox(width: 10),
@@ -267,7 +394,8 @@ class _DebtTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(debt.customerName, style: textTheme.titleSmall),
-                    if (debt.note != null) Text(debt.note!, style: textTheme.bodySmall),
+                    if (debt.note != null)
+                      Text(debt.note!, style: textTheme.bodySmall),
                   ],
                 ),
               ),
@@ -275,24 +403,45 @@ class _DebtTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: (isPaid ? AppColors.success : AppColors.error).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(AppConstants.radiusFull),
+                      color: (isPaid ? AppColors.success : AppColors.error)
+                          .withOpacity(0.1),
+                      borderRadius:
+                          BorderRadius.circular(AppConstants.radiusFull),
                     ),
                     child: Text(
                       isPaid ? 'Paid' : 'Unpaid',
-                      style: textTheme.labelSmall?.copyWith(color: isPaid ? AppColors.success : AppColors.error),
+                      style: textTheme.labelSmall?.copyWith(
+                          color: isPaid ? AppColors.success : AppColors.error),
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'YER ${debt.remaining.toStringAsFixed(0)}',
                     style: textTheme.titleSmall?.copyWith(
-                      color: isPaid ? AppColors.success : AppColors.error,
-                      fontWeight: FontWeight.w700,
-                    ),
+                        color: isPaid ? AppColors.success : AppColors.error,
+                        fontWeight: FontWeight.w700),
                   ),
+                  if (onEdit != null || onDelete != null) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (onEdit != null)
+                          _IconBtn(
+                              icon: Icons.edit_outlined, onTap: onEdit!),
+                        if (onEdit != null && onDelete != null)
+                          const SizedBox(width: 4),
+                        if (onDelete != null)
+                          _IconBtn(
+                              icon: Icons.delete_outline_rounded,
+                              onTap: onDelete!,
+                              color: AppColors.error),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ],
@@ -300,7 +449,9 @@ class _DebtTile extends StatelessWidget {
           if (!isPaid) ...[
             const SizedBox(height: 10),
             LinearProgressIndicator(
-              value: debt.paidAmount / debt.originalAmount,
+              value: debt.originalAmount > 0
+                  ? (debt.totalPaid / debt.originalAmount).clamp(0, 1)
+                  : 0,
               backgroundColor: AppColors.error.withOpacity(0.12),
               valueColor: const AlwaysStoppedAnimation(AppColors.success),
               borderRadius: BorderRadius.circular(AppConstants.radiusFull),
@@ -309,8 +460,10 @@ class _DebtTile extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Paid: YER ${debt.paidAmount.toStringAsFixed(0)}', style: textTheme.bodySmall),
-                Text('Original: YER ${debt.originalAmount.toStringAsFixed(0)}', style: textTheme.bodySmall),
+                Text('Paid: YER ${debt.totalPaid.toStringAsFixed(0)}',
+                    style: textTheme.bodySmall),
+                Text('Original: YER ${debt.originalAmount.toStringAsFixed(0)}',
+                    style: textTheme.bodySmall),
               ],
             ),
             const SizedBox(height: 8),
@@ -333,31 +486,24 @@ class _DebtTile extends StatelessWidget {
   }
 }
 
-class _DebtEntry {
-  final String id;
-  final String customerName;
-  final double originalAmount;
-  final double paidAmount;
-  final DateTime date;
-  final String? note;
+class _IconBtn extends StatelessWidget {
+  const _IconBtn({required this.icon, required this.onTap, this.color});
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color? color;
 
-  const _DebtEntry({
-    required this.id, required this.customerName, required this.originalAmount,
-    required this.paidAmount, required this.date, this.note,
-  });
-
-  double get remaining => (originalAmount - paidAmount).clamp(0, double.infinity);
-
-  _DebtEntry withPayment(double amount) => _DebtEntry(
-        id: id, customerName: customerName, originalAmount: originalAmount,
-        paidAmount: (paidAmount + amount).clamp(0, originalAmount),
-        date: date, note: note,
-      );
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: (color ?? AppColors.primary).withOpacity(0.08),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Icon(icon, size: 16, color: color ?? AppColors.primary),
+      ),
+    );
+  }
 }
-
-final _demoDebts = [
-  _DebtEntry(id: '1', customerName: 'Ahmed Al-Mansoori', originalAmount: 5400, paidAmount: 2000, date: DateTime.now().subtract(const Duration(days: 5))),
-  _DebtEntry(id: '2', customerName: 'Fatima Hassan', originalAmount: 1200, paidAmount: 0, date: DateTime.now().subtract(const Duration(days: 2))),
-  _DebtEntry(id: '3', customerName: 'Mohammed Al-Yemeni', originalAmount: 3000, paidAmount: 3000, date: DateTime.now().subtract(const Duration(days: 10))),
-  _DebtEntry(id: '4', customerName: 'Sara Nasser', originalAmount: 800, paidAmount: 500, date: DateTime.now().subtract(const Duration(days: 1)), note: 'Groceries purchase'),
-];
