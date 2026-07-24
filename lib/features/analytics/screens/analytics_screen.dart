@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/repositories/sale_repository.dart';
 import '../../../shared/widgets/app_card.dart';
 import '../../../shared/widgets/stat_card.dart';
 
@@ -14,6 +15,18 @@ class AnalyticsScreen extends StatefulWidget {
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   _Period _period = _Period.week;
+  final SaleRepository _saleRepository = SaleRepository();
+
+  int get _periodDays {
+    switch (_period) {
+      case _Period.week:
+        return 7;
+      case _Period.month:
+        return 30;
+      case _Period.year:
+        return 365;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,45 +56,56 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ),
             const SizedBox(height: 16),
 
-            // KPI cards
-            GridView.count(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.4,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                StatCard(
-                  label: 'Revenue',
-                  value: _period == _Period.week ? 'YER 129,500' : _period == _Period.month ? 'YER 542,000' : 'YER 6.4M',
-                  icon: Icons.payments_rounded,
-                  color: AppColors.primary,
-                  change: '14%',
-                ),
-                StatCard(
-                  label: 'Profit',
-                  value: _period == _Period.week ? 'YER 29,750' : _period == _Period.month ? 'YER 124,600' : 'YER 1.47M',
-                  icon: Icons.trending_up_rounded,
-                  color: AppColors.accent,
-                  change: '9%',
-                ),
-                StatCard(
-                  label: 'Expenses',
-                  value: _period == _Period.week ? 'YER 99,750' : _period == _Period.month ? 'YER 417,400' : 'YER 4.93M',
-                  icon: Icons.receipt_rounded,
-                  color: AppColors.error,
-                  change: '3%',
-                  isPositiveChange: false,
-                ),
-                StatCard(
-                  label: 'Transactions',
-                  value: _period == _Period.week ? '329' : _period == _Period.month ? '1,420' : '17,040',
-                  icon: Icons.swap_horiz_rounded,
-                  color: const Color(0xFF7C3AED),
-                  change: '7%',
-                ),
-              ],
+            // KPI cards — driven by daily revenue/profit stream
+            StreamBuilder<List<DailyRevenueProfit>>(
+              stream: _saleRepository.watchDailyRevenueProfit(days: _periodDays),
+              builder: (context, snapshot) {
+                final data = snapshot.data ?? [];
+                final totalRevenue = data.fold<double>(0, (s, e) => s + e.revenue);
+                final totalProfit = data.fold<double>(0, (s, e) => s + e.profit);
+                final totalExpenses = totalRevenue - totalProfit;
+                final transactionCount = data.length;
+
+                return GridView.count(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.4,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    StatCard(
+                      label: 'Revenue',
+                      value: 'YER ${_fmt(totalRevenue)}',
+                      icon: Icons.payments_rounded,
+                      color: AppColors.primary,
+                      change: null,
+                    ),
+                    StatCard(
+                      label: 'Profit',
+                      value: 'YER ${_fmt(totalProfit)}',
+                      icon: Icons.trending_up_rounded,
+                      color: AppColors.accent,
+                      change: null,
+                    ),
+                    StatCard(
+                      label: 'Expenses',
+                      value: 'YER ${_fmt(totalExpenses)}',
+                      icon: Icons.receipt_rounded,
+                      color: AppColors.error,
+                      change: null,
+                      isPositiveChange: false,
+                    ),
+                    StatCard(
+                      label: 'Transactions',
+                      value: '$transactionCount',
+                      icon: Icons.swap_horiz_rounded,
+                      color: const Color(0xFF7C3AED),
+                      change: null,
+                    ),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 20),
 
@@ -92,67 +116,74 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               padding: const EdgeInsets.all(16),
               child: SizedBox(
                 height: 200,
-                child: LineChart(
-                  LineChartData(
-                    gridData: FlGridData(
-                      show: true,
-                      drawVerticalLine: false,
-                      getDrawingHorizontalLine: (v) => FlLine(
-                        color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
-                        strokeWidth: 1,
-                      ),
-                    ),
-                    titlesData: FlTitlesData(
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          getTitlesWidget: (v, meta) {
-                            const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-                            final idx = v.toInt();
-                            if (idx < 0 || idx >= days.length) return const SizedBox.shrink();
-                            return Text(days[idx], style: Theme.of(context).textTheme.labelSmall);
-                          },
-                          reservedSize: 20,
-                        ),
-                      ),
-                      leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    ),
-                    borderData: FlBorderData(show: false),
-                    lineBarsData: [
-                      // Revenue line
-                      LineChartBarData(
-                        spots: const [
-                          FlSpot(0, 18500), FlSpot(1, 15200), FlSpot(2, 21000),
-                          FlSpot(3, 17800), FlSpot(4, 22500), FlSpot(5, 19000), FlSpot(6, 15500),
-                        ],
-                        isCurved: true,
-                        color: AppColors.primary,
-                        barWidth: 2.5,
-                        dotData: const FlDotData(show: false),
-                        belowBarData: BarAreaData(
+                child: StreamBuilder<List<DailyRevenueProfit>>(
+                  stream: _saleRepository.watchDailyRevenueProfit(days: _periodDays),
+                  builder: (context, snapshot) {
+                    final data = snapshot.data ?? [];
+                    final revenueSpots = <FlSpot>[];
+                    final profitSpots = <FlSpot>[];
+                    for (var i = 0; i < data.length; i++) {
+                      revenueSpots.add(FlSpot(i.toDouble(), data[i].revenue));
+                      profitSpots.add(FlSpot(i.toDouble(), data[i].profit));
+                    }
+
+                    return LineChart(
+                      LineChartData(
+                        gridData: FlGridData(
                           show: true,
-                          color: AppColors.primary.withOpacity(0.08),
+                          drawVerticalLine: false,
+                          getDrawingHorizontalLine: (v) => FlLine(
+                            color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
+                            strokeWidth: 1,
+                          ),
                         ),
-                      ),
-                      // Profit line
-                      LineChartBarData(
-                        spots: const [
-                          FlSpot(0, 4250), FlSpot(1, 3500), FlSpot(2, 4830),
-                          FlSpot(3, 4100), FlSpot(4, 5200), FlSpot(5, 4370), FlSpot(6, 3570),
+                        titlesData: FlTitlesData(
+                          bottomTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              getTitlesWidget: (v, meta) {
+                                final idx = v.toInt();
+                                if (idx < 0 || idx >= data.length) {
+                                  return const SizedBox.shrink();
+                                }
+                                final label = _dayLabel(data[idx].date);
+                                return Text(label, style: Theme.of(context).textTheme.labelSmall);
+                              },
+                              reservedSize: 20,
+                            ),
+                          ),
+                          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        ),
+                        borderData: FlBorderData(show: false),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: revenueSpots,
+                            isCurved: true,
+                            color: AppColors.primary,
+                            barWidth: 2.5,
+                            dotData: const FlDotData(show: false),
+                            belowBarData: BarAreaData(
+                              show: true,
+                              color: AppColors.primary.withOpacity(0.08),
+                            ),
+                          ),
+                          LineChartBarData(
+                            spots: profitSpots,
+                            isCurved: true,
+                            color: AppColors.accent,
+                            barWidth: 2.5,
+                            dotData: const FlDotData(show: false),
+                            belowBarData: BarAreaData(
+                              show: true,
+                              color: AppColors.accent.withOpacity(0.08),
+                            ),
+                          ),
                         ],
-                        isCurved: true,
-                        color: AppColors.accent,
-                        barWidth: 2.5,
-                        dotData: const FlDotData(show: false),
-                        belowBarData: BarAreaData(
-                          show: true,
-                          color: AppColors.accent.withOpacity(0.08),
-                        ),
                       ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -161,43 +192,71 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             // Best sellers
             Text('Best Sellers', style: textTheme.titleMedium),
             const SizedBox(height: 12),
-            ..._bestSellers.asMap().entries.map((e) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _BestSellerRow(rank: e.key + 1, data: e.value),
-                )),
+            StreamBuilder<List<BestSellerEntry>>(
+              stream: _saleRepository.watchBestSellers(days: _periodDays),
+              builder: (context, snapshot) {
+                final data = snapshot.data ?? [];
+                if (data.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: Text('No sales data for this period.', style: textTheme.bodySmall),
+                    ),
+                  );
+                }
+                return Column(
+                  children: data.asMap().entries.map((e) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _BestSellerRow(rank: e.key + 1, entry: e.value),
+                  )).toList(),
+                );
+              },
+            ),
             const SizedBox(height: 20),
 
             // Category breakdown (pie chart)
             Text('Sales by Category', style: textTheme.titleMedium),
             const SizedBox(height: 12),
-            AppCard(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 140,
-                    height: 140,
-                    child: PieChart(
-                      PieChartData(
-                        sections: _categoryData.asMap().entries.map((e) {
-                          return PieChartSectionData(
-                            value: e.value['pct'] as double,
-                            color: AppColors.chartColors[e.key % AppColors.chartColors.length],
-                            radius: 50,
-                            title: '${(e.value['pct'] as double).toStringAsFixed(0)}%',
-                            titleStyle: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w700),
-                          );
-                        }).toList(),
-                        centerSpaceRadius: 20,
-                        sectionsSpace: 2,
-                      ),
+            StreamBuilder<List<CategoryShare>>(
+              stream: _saleRepository.watchCategoryBreakdown(days: _periodDays),
+              builder: (context, snapshot) {
+                final data = snapshot.data ?? [];
+                if (data.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: Text('No category data for this period.', style: textTheme.bodySmall),
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: _categoryData.asMap().entries.map((e) => Padding(
+                  );
+                }
+                return AppCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 140,
+                        height: 140,
+                        child: PieChart(
+                          PieChartData(
+                            sections: data.asMap().entries.map((e) {
+                              return PieChartSectionData(
+                                value: e.value.percentage,
+                                color: AppColors.chartColors[e.key % AppColors.chartColors.length],
+                                radius: 50,
+                                title: '${e.value.percentage.toStringAsFixed(0)}%',
+                                titleStyle: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w700),
+                              );
+                            }).toList(),
+                            centerSpaceRadius: 20,
+                            sectionsSpace: 2,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: data.asMap().entries.map((e) => Padding(
                             padding: const EdgeInsets.only(bottom: 6),
                             child: Row(
                               children: [
@@ -210,15 +269,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 6),
-                                Expanded(child: Text(e.value['label'] as String, style: textTheme.bodySmall)),
-                                Text('${(e.value['pct'] as double).toStringAsFixed(0)}%', style: textTheme.labelSmall),
+                                Expanded(child: Text(e.value.category, style: textTheme.bodySmall)),
+                                Text('${e.value.percentage.toStringAsFixed(0)}%', style: textTheme.labelSmall),
                               ],
                             ),
                           )).toList(),
-                    ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
             const SizedBox(height: 24),
           ],
@@ -226,12 +287,27 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       ),
     );
   }
+
+  String _fmt(double value) {
+    if (value >= 1000000) {
+      return '${(value / 1000000).toStringAsFixed(1)}M';
+    }
+    return value.toStringAsFixed(0).replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (m) => ',',
+    );
+  }
+
+  String _dayLabel(DateTime date) {
+    const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    return days[date.weekday - 1];
+  }
 }
 
 class _BestSellerRow extends StatelessWidget {
-  const _BestSellerRow({required this.rank, required this.data});
+  const _BestSellerRow({required this.rank, required this.entry});
   final int rank;
-  final Map<String, dynamic> data;
+  final BestSellerEntry entry;
 
   @override
   Widget build(BuildContext context) {
@@ -257,35 +333,26 @@ class _BestSellerRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Text(data['name'] as String, style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500))),
+          Expanded(child: Text(entry.productName, style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500))),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(data['revenue'] as String, style: textTheme.titleSmall?.copyWith(color: AppColors.primary, fontWeight: FontWeight.w700)),
-              Text('${data['units']} units', style: textTheme.bodySmall),
+              Text('YER ${_fmtRevenue(entry.revenue)}', style: textTheme.titleSmall?.copyWith(color: AppColors.primary, fontWeight: FontWeight.w700)),
+              Text('${entry.units} units', style: textTheme.bodySmall),
             ],
           ),
         ],
       ),
     );
   }
+
+  String _fmtRevenue(double value) {
+    return value.toStringAsFixed(0).replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (m) => ',',
+    );
+  }
 }
-
-const _bestSellers = [
-  {'name': 'Cooking Oil (1L)', 'revenue': 'YER 54,000', 'units': 45},
-  {'name': 'Rice (5kg)', 'revenue': 'YER 37,500', 'units': 15},
-  {'name': 'Sugar (1kg)', 'revenue': 'YER 28,800', 'units': 36},
-  {'name': 'Tea (250g)', 'revenue': 'YER 19,500', 'units': 30},
-  {'name': 'Flour (2kg)', 'revenue': 'YER 15,400', 'units': 14},
-];
-
-const _categoryData = [
-  {'label': 'Oils & Fats', 'pct': 35.0},
-  {'label': 'Grains', 'pct': 25.0},
-  {'label': 'Beverages', 'pct': 15.0},
-  {'label': 'Canned Goods', 'pct': 12.0},
-  {'label': 'Other', 'pct': 13.0},
-];
 
 enum _Period {
   week,
