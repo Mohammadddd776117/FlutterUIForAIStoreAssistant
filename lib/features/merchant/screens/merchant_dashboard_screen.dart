@@ -4,6 +4,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utilities/app_date_utils.dart';
+import '../../../shared/models/sale_model.dart';
 import '../../../shared/repositories/product_repository.dart';
 import '../../../shared/repositories/sale_repository.dart';
 import '../../../shared/services/auth_service.dart';
@@ -271,7 +272,49 @@ class _DashboardTabState extends State<_DashboardTab> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                ..._demoTransactions.map((t) => _TransactionTile(data: t)),
+                StreamBuilder<List<SaleModel>>(
+                  stream: _saleRepository.watchRecentSales(limit: 5),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Text(
+                          'Unable to load recent sales.',
+                          style: textTheme.bodySmall?.copyWith(color: AppColors.error),
+                        ),
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Center(
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      );
+                    }
+                    final sales = snapshot.data!;
+                    if (sales.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Center(
+                          child: Text(
+                            'No sales yet today.',
+                            style: textTheme.bodySmall,
+                          ),
+                        ),
+                      );
+                    }
+                    return Column(
+                      children: sales
+                          .map((sale) => _TransactionTile(sale: sale))
+                          .toList(),
+                    );
+                  },
+                ),
                 const SizedBox(height: 24),
               ]),
             ),
@@ -394,12 +437,17 @@ class _AiRecommendationCard extends StatelessWidget {
 }
 
 class _TransactionTile extends StatelessWidget {
-  const _TransactionTile({required this.data});
-  final Map<String, dynamic> data;
+  const _TransactionTile({required this.sale});
+  final SaleModel sale;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final itemCount = sale.items.fold<int>(0, (sum, item) => sum + item.quantity);
+    final timeLabel = AppDateUtils.relativeTime(sale.createdAt.toLocal());
+    final amountLabel =
+        '+YER ${sale.total.toStringAsFixed(0).replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',')}';
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: AppCard(
@@ -420,13 +468,16 @@ class _TransactionTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(data['label'] as String, style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
-                  Text(data['time'] as String, style: textTheme.bodySmall),
+                  Text(
+                    '$itemCount item${itemCount == 1 ? '' : 's'}',
+                    style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  Text(timeLabel, style: textTheme.bodySmall),
                 ],
               ),
             ),
             Text(
-              data['amount'] as String,
+              amountLabel,
               style: textTheme.titleSmall?.copyWith(
                 color: AppColors.success,
                 fontWeight: FontWeight.w700,
@@ -438,10 +489,3 @@ class _TransactionTile extends StatelessWidget {
     );
   }
 }
-
-const _demoTransactions = [
-  {'label': 'Sale #1047 — 5 items', 'time': '10 mins ago', 'amount': '+YER 850'},
-  {'label': 'Sale #1046 — 2 items', 'time': '34 mins ago', 'amount': '+YER 340'},
-  {'label': 'Sale #1045 — 8 items', 'time': '1 hour ago', 'amount': '+YER 1,420'},
-  {'label': 'Sale #1044 — 1 item', 'time': '2 hours ago', 'amount': '+YER 120'},
-];
