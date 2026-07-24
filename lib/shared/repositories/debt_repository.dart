@@ -28,6 +28,11 @@ class DebtRepository {
     }
   }
 
+  /// Creates a new debt record.
+  ///
+  /// [customerId] is the FK to the customers table; stored when the user
+  /// selects a customer from the DB picker. [customerName] is always stored
+  /// for backward-compatibility with debts that pre-date the customer relation.
   Future<DebtModel> createDebt({
     required String customerName,
     required double amount,
@@ -44,8 +49,10 @@ class DebtRepository {
     try {
       final now = DateTime.now();
       final entity = DebtsCompanion(
-        id: Value(Uuid().v4()),
-        customerId: customerId != null ? Value(customerId) : const Value.absent(),
+        id: Value(const Uuid().v4()),
+        customerId: customerId != null
+            ? Value(customerId.trim())
+            : const Value.absent(),
         customerName: Value(customerName.trim()),
         originalAmount: Value(amount),
         paidAmount: const Value(0),
@@ -55,7 +62,7 @@ class DebtRepository {
       await _db.into(_db.debts).insert(entity);
       return DebtModel(
         id: entity.id.value,
-        customerId: customerId ?? '',
+        customerId: customerId?.trim() ?? '',
         customerName: customerName.trim(),
         originalAmount: amount,
         createdAt: now,
@@ -67,6 +74,11 @@ class DebtRepository {
     }
   }
 
+  /// Updates an existing debt record.
+  ///
+  /// Only the fields provided (non-null) are written; omitted fields keep
+  /// their current values. Pass [customerId] when the user selects a customer
+  /// from the DB picker so the FK relation is saved alongside [customerName].
   Future<DebtModel> updateDebt({
     required String id,
     String? customerName,
@@ -83,9 +95,14 @@ class DebtRepository {
       }
 
       final companion = DebtsCompanion(
-        customerId: customerId != null ? Value(customerId) : const Value.absent(),
-        customerName: customerName != null ? Value(customerName.trim()) : const Value.absent(),
-        originalAmount: amount != null ? Value(amount) : const Value.absent(),
+        customerId: customerId != null
+            ? Value(customerId.trim())
+            : const Value.absent(),
+        customerName: customerName != null
+            ? Value(customerName.trim())
+            : const Value.absent(),
+        originalAmount:
+            amount != null ? Value(amount) : const Value.absent(),
         note: Value(note?.trim()),
       );
 
@@ -121,13 +138,16 @@ class DebtRepository {
       throw ValidationException('Payment amount must be greater than zero.');
     }
     try {
-      final existing = await (_db.select(_db.debts)..where((tbl) => tbl.id.equals(id))).getSingleOrNull();
+      final existing = await (_db.select(_db.debts)
+            ..where((tbl) => tbl.id.equals(id)))
+          .getSingleOrNull();
       if (existing == null) {
         throw ValidationException('Debt not found.');
       }
-      final updatedPaid = (existing.paidAmount + amount).clamp(0, existing.originalAmount).toDouble();
-      await (_db.update(_db.debts)
-            ..where((tbl) => tbl.id.equals(id)))
+      final updatedPaid = (existing.paidAmount + amount)
+          .clamp(0, existing.originalAmount)
+          .toDouble();
+      await (_db.update(_db.debts)..where((tbl) => tbl.id.equals(id)))
           .write(DebtsCompanion(paidAmount: Value(updatedPaid)));
       final row = await (_db.select(_db.debts)
             ..where((tbl) => tbl.id.equals(id)))
