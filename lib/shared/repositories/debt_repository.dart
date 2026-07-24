@@ -28,7 +28,12 @@ class DebtRepository {
     }
   }
 
-  Future<DebtModel> createDebt({required String customerName, required double amount, String? note}) async {
+  Future<DebtModel> createDebt({
+    required String customerName,
+    required double amount,
+    String? customerId,
+    String? note,
+  }) async {
     if (customerName.trim().isEmpty) {
       throw ValidationException('Customer name is required.');
     }
@@ -40,6 +45,7 @@ class DebtRepository {
       final now = DateTime.now();
       final entity = DebtsCompanion(
         id: Value(Uuid().v4()),
+        customerId: customerId != null ? Value(customerId) : const Value.absent(),
         customerName: Value(customerName.trim()),
         originalAmount: Value(amount),
         paidAmount: const Value(0),
@@ -49,7 +55,7 @@ class DebtRepository {
       await _db.into(_db.debts).insert(entity);
       return DebtModel(
         id: entity.id.value,
-        customerId: '',
+        customerId: customerId ?? '',
         customerName: customerName.trim(),
         originalAmount: amount,
         createdAt: now,
@@ -64,6 +70,7 @@ class DebtRepository {
   Future<DebtModel> updateDebt({
     required String id,
     String? customerName,
+    String? customerId,
     double? amount,
     String? note,
   }) async {
@@ -76,6 +83,7 @@ class DebtRepository {
       }
 
       final companion = DebtsCompanion(
+        customerId: customerId != null ? Value(customerId) : const Value.absent(),
         customerName: customerName != null ? Value(customerName.trim()) : const Value.absent(),
         originalAmount: amount != null ? Value(amount) : const Value.absent(),
         note: Value(note?.trim()),
